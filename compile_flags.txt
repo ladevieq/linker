@@ -1,0 +1,10 @@
+/W4
+/WX
+/Zi
+/GS-
+/GR-
+/Gs1000000000
+/Fo:%BUILD_DIR%\
+/Iinclude
+/Isrc
+/std:clatest
