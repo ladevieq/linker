@@ -21,6 +21,8 @@ const u64 lib_signature = 0x0A3E686372613C21; // IMAGE_ARCHIVE_START
 
 #define ALIGN(x, align) (((x) + (align - 1U)) / (align)) * (align)
 
+#define ASSERT(x) if (!(x)) { __debugbreak(); }
+
 struct coff_header {
     u16 machine_type;
     u16 sections_count;
@@ -498,6 +500,52 @@ void read_lib(u8* buffer) {
     }
 }
 
+const uint8_t MS_DOS_stub[128] = {
+    0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 
+    0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 
+    0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
+    0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68, 
+    0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
+    0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F, 
+    0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
+    0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20, 
+    0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
+    0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+void write_ms_dos_stub(u8** next_byte) {
+    // TODO: memcpy
+    for (u32 index = 0U; index < sizeof(MS_DOS_stub); index++, (*next_byte)++) {
+        **next_byte = MS_DOS_stub[index];
+    }
+}
+
+void write_coff_header(u8** next_byte) {
+    FILETIME filetime = { 0U };
+    GetSystemTimeAsFileTime(&filetime);
+
+    struct coff_header header = {
+        .machine_type = IMAGE_FILE_MACHINE_AMD64,
+        .sections_count = 0U,
+        .timestamp = filetime.dwLowDateTime,
+        .symbol_table_offset = 0U,
+        .symbols_count = 0U,
+        .optional_header_size = 0U,
+        .characteristics = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE,
+    };
+
+    struct coff_header** header_offset = (struct coff_header**)next_byte;
+    // This might produce really inneficient code
+    **header_offset = header;
+    (*header_offset)++;
+}
+
 int mainCRTStartup(void) {
     char* args_string = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     char** argv = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -587,8 +635,25 @@ int mainCRTStartup(void) {
         } else {
             read_COFF(buffer);
         }
+        CloseHandle(file);
         VirtualFree(buffer, 0U, MEM_RELEASE);
     }
+
+    // TODO: Reserve a huge block and commit when we need more memory
+    u8* exe_buffer = VirtualAlloc(NULL, 4096U * 10U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    u8* next_byte = exe_buffer;
+    HANDLE output_file = CreateFile("./test.exe", GENERIC_WRITE, 0U, NULL, CREATE_ALWAYS, 0U, NULL);
+
+    write_ms_dos_stub(&next_byte);
+    write_coff_header(&next_byte);
+
+    DWORD bwrite = 0U;
+    u64 bytes_to_write = next_byte - exe_buffer;
+    ASSERT(bytes_to_write <= 0xffffffffU);
+
+    WriteFile(output_file, &exe_buffer, (DWORD)bytes_to_write, &bwrite, NULL);
+    ASSERT(bwrite == bytes_to_write);
+    CloseHandle(output_file);
 
     __debugbreak();
 
