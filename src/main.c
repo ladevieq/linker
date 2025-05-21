@@ -15,9 +15,9 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
-const u32 TEXT_SECTION_FLAGS = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
-const u32 DRECTVE_SECTION_FLAGS = (IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
-const u64 lib_signature = 0x0A3E686372613C21; // IMAGE_ARCHIVE_START
+static const u32 TEXT_SECTION_FLAGS = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
+static const u32 DRECTVE_SECTION_FLAGS = (IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
+static const u64 lib_signature = 0x0A3E686372613C21; // IMAGE_ARCHIVE_START
 
 #define ALIGN(x, align) (((x) + (align - 1U)) / (align)) * (align)
 
@@ -77,19 +77,32 @@ struct relocation_entry {
     u16 type;
 };
 
-u8 is_alpha(char c) {
+static u8 is_alpha(char c) {
     return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
 }
 
-u8 is_decimal_digit(char c) {
+static u8 is_decimal_digit(char c) {
     return '0' <= c && c <= '9';
 }
 
-u8 is_hexadecimal_digit(char c) {
-    return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F');
+// TODO: Improve
+static void mem_cpy(void* src, void* dst, size_t size) {
+    u8* byte_src = (u8*)src;
+    u8* byte_dst = (u8*)dst;
+
+    for (u32 index = 0U; index < size; index++) {
+        byte_dst[index] = byte_src[index];
+    }
 }
 
-void u64toa(u64 number, char* str, u32 base) {
+static void mem_set(void* ptr, size_t size, u8 value) {
+    u8* bytes = ptr;
+    for (u32 index = 0U; index < size; index++) {
+        bytes[index] = value;
+    }
+}
+
+static void u64toa(u64 number, char* str, u32 base) {
     static char codes[16U] = {
         '0',
         '1',
@@ -129,7 +142,7 @@ void u64toa(u64 number, char* str, u32 base) {
     }
 }
 
-u64 atou64(const char* str, u32 len) {
+static u64 atou64(const char* str, u32 len) {
     u64 number = 0U;
     u32 base = 10U;
     const char* c = str;
@@ -141,7 +154,7 @@ u64 atou64(const char* str, u32 len) {
 
     for (; (u32)(c - str) < len; c++) {
         number *= base;
-        u32 offset = 0U;
+        u8 offset = 0U;
         if ('0' <= *c && *c <= '9') {
             offset = 48U;
         } else if ('a' <= *c && *c <= 'f') {
@@ -149,16 +162,17 @@ u64 atou64(const char* str, u32 len) {
         } else if ('A' <= *c && *c <= 'F') {
             offset = 55U;
         } else {
-            return 0U;
+            return 0;
         }
 
-        number += (*c - offset);
+        ASSERT(0 <= *c)
+        number += ((u8)*c - offset);
     }
 
     return number;
 }
 
-void print(const char* format, ...) {
+static void print(const char* format, ...) {
     va_list args;
     va_start(args, format);
     char formatted_str[4096U] = { 0 };
@@ -190,7 +204,7 @@ void print(const char* format, ...) {
                     cur_char += length;
                 }
             } else if(*cur_fmt == 'c') {
-                char c = va_arg(args, char);
+                char c = (char)va_arg(args, int);
                 StringCchCatA(cur_char, 1U, &c);
                 cur_char += 1U;
             } else if (*cur_fmt == 'x' && is_alpha(cur_fmt[1])) {
@@ -202,7 +216,7 @@ void print(const char* format, ...) {
                 cur_fmt++;
 
                 if(*cur_fmt == 'b') {
-                    u8 number = va_arg(args, u8);
+                    u8 number = (u8)va_arg(args, int);
                     u64toa((u64)number, cur_char, base);
                     size_t length = 0U;
                     StringCchLengthA(formatted_str, sizeof(formatted_str), &length);
@@ -215,7 +229,7 @@ void print(const char* format, ...) {
                     cur_char = formatted_str + length;
                 }
             } else if(*cur_fmt == 'b') {
-                u8 number = va_arg(args, u8);
+                u8 number = (u8)va_arg(args, int);
                 u64toa((u64)number, cur_char, 10U);
                 size_t length = 0U;
                 StringCchLengthA(formatted_str, sizeof(formatted_str), &length);
@@ -236,11 +250,13 @@ void print(const char* format, ...) {
     va_end(args);
 
     HANDLE standard_err = GetStdHandle(STD_ERROR_HANDLE);
-    size_t length = (u8*)cur_char - (u8*)formatted_str;
-    SUCCEEDED(WriteFile(standard_err, formatted_str, (DWORD)length, NULL, NULL));
+
+    ASSERT(((u8*)cur_char - (u8*)formatted_str) < 0xffffffff)
+    DWORD length = (DWORD)((u8*)cur_char - (u8*)formatted_str);
+    SUCCEEDED(WriteFile(standard_err, formatted_str, length, NULL, NULL));
 }
 
-void read_COFF(u8* buffer) {
+static void read_COFF(u8* buffer) {
     u8* next_byte = buffer;
     struct coff_header header = *(struct coff_header*)next_byte;
     next_byte += sizeof(header);
@@ -354,7 +370,7 @@ void read_COFF(u8* buffer) {
         }
 
         if (cur_symbol->section_number > 1) {
-            print("SECTION: %s\n", sections[cur_symbol->section_number - 1U].name);
+            print("SECTION: %s\n", sections[(u16)cur_symbol->section_number - 1U].name);
         } else if (cur_symbol->section_number == IMAGE_SYM_UNDEFINED) {
             print("SECTION: EXTERNAL SYMBOL\n");
         } else if (cur_symbol->section_number == IMAGE_SYM_ABSOLUTE) {
@@ -395,7 +411,7 @@ struct import_header {
 
 #define BSWAP32(x) ((x & 0x000000FF) << 24U) | ((x & 0x0000FF00) << 8U) | ((x & 0x00FF0000) >> 8U) | ((x & 0xFF000000) >> 24U)
 
-void read_lib(u8* buffer) {
+static void read_lib(u8* buffer) {
     u8* next_byte = buffer;
 
     {
@@ -500,50 +516,138 @@ void read_lib(u8* buffer) {
     }
 }
 
-const uint8_t MS_DOS_stub[128] = {
-    0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00,
-    0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 
-    0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 
-    0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
-    0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68, 
-    0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
-    0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F, 
-    0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
-    0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20, 
-    0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
-    0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+struct PE_headers {
+    IMAGE_DOS_HEADER dos_header;
+    u8 dos_stub[88U];
+    u32 nt_signature;
+    IMAGE_FILE_HEADER img_header;
+    IMAGE_OPTIONAL_HEADER64 opt_header;
+
 };
 
-void write_ms_dos_stub(u8** next_byte) {
-    // TODO: memcpy
-    for (u32 index = 0U; index < sizeof(MS_DOS_stub); index++, (*next_byte)++) {
-        **next_byte = MS_DOS_stub[index];
-    }
-}
+#define SECTION_ALIGNMENT   4096U  // default values for optional header
+#define FILE_ALIGNMENT      512U      // default values for optional header
 
-void write_coff_header(u8** next_byte) {
+static struct PE_headers PE_headers = {
+    .dos_header = {
+        .e_magic    = IMAGE_DOS_SIGNATURE,
+        .e_cblp     = 0x0009U,
+        .e_cp       = 0x0003U,
+        .e_crlc     = 0x0U,
+        .e_cparhdr  = 0x0U,
+        .e_minalloc = 0x0U,
+        .e_maxalloc = 0x0U,
+        .e_ss       = 0x0U,
+        .e_sp       = 0x0U,
+        .e_csum     = 0x0U,
+        .e_ip       = 0x0U,
+        .e_cs       = 0x0U,
+        .e_lfarlc   = 0x0U,
+        .e_ovno     = 0x0U,
+        .e_res      = { 0x0 },
+        .e_oemid    = 0x0U,
+        .e_oeminfo  = 0x0U,
+        .e_res2     = { 0x0 },
+        .e_lfanew   = offsetof(struct PE_headers, nt_signature),
+    },
+    .dos_stub = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 
+        0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
+        0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68, 
+        0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
+        0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F, 
+        0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
+        0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20, 
+        0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
+        0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    },
+    .nt_signature = IMAGE_NT_SIGNATURE,
+    .img_header = {
+        .Machine                = IMAGE_FILE_MACHINE_AMD64,
+        .NumberOfSections       = 0U,
+        .TimeDateStamp          = 0U,
+        .PointerToSymbolTable   = 0U,
+        .NumberOfSymbols        = 0U,
+        .SizeOfOptionalHeader   = sizeof(PE_headers.opt_header),
+        .Characteristics        = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE,
+    },
+    .opt_header = {
+        .Magic                          = IMAGE_NT_OPTIONAL_HDR64_MAGIC,
+        .MajorLinkerVersion             = 0U,
+        .MinorLinkerVersion             = 1U,
+        .SizeOfCode                     = 0U,
+        .SizeOfInitializedData          = 0U,
+        .SizeOfUninitializedData        = 0U,
+        .AddressOfEntryPoint            = 0U,
+        .BaseOfCode                     = 0U,
+        .ImageBase                      = 0x00400000U,  // default value for Windows NT/2000/XP/95/98/ME
+        .SectionAlignment               = SECTION_ALIGNMENT,
+        .FileAlignment                  = FILE_ALIGNMENT,
+        .MajorOperatingSystemVersion    = 6U,
+        .MinorOperatingSystemVersion    = 0U,
+        .MajorImageVersion              = 0U,
+        .MinorImageVersion              = 0U,
+        .MajorSubsystemVersion          = 6U,
+        .MinorSubsystemVersion          = 0U,
+        .Win32VersionValue              = 0U,
+        .SizeOfImage                    = 4096U,    // must be aligned on section alignment
+        .SizeOfHeaders                  = 0U,       // must be aligned on file alignment
+        .CheckSum                       = 0U,
+        .Subsystem                      = IMAGE_SUBSYSTEM_WINDOWS_CUI,
+        .DllCharacteristics             = 0U,
+        .SizeOfStackReserve             = 4096U * 10U,  // Arbitrary values
+        .SizeOfStackCommit              = 4096U * 10U,  // Arbitrary values
+        .SizeOfHeapReserve              = 4096U * 10U,  // Arbitrary values
+        .SizeOfHeapCommit               = 4096U * 10U,  // Arbitrary values
+        .LoaderFlags = 0U,
+        .NumberOfRvaAndSizes = 0U,
+        .DataDirectory = { 0x0 },
+    },
+};
+
+static void write_exe_headers(IMAGE_SECTION_HEADER* section_table, u16 section_count) {
+    ASSERT(section_count > 0U)
+
     FILETIME filetime = { 0U };
     GetSystemTimeAsFileTime(&filetime);
 
-    struct coff_header header = {
-        .machine_type = IMAGE_FILE_MACHINE_AMD64,
-        .sections_count = 0U,
-        .timestamp = filetime.dwLowDateTime,
-        .symbol_table_offset = 0U,
-        .symbols_count = 0U,
-        .optional_header_size = 0U,
-        .characteristics = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE,
-    };
+    PE_headers.img_header.TimeDateStamp     = filetime.dwLowDateTime;
+    PE_headers.img_header.NumberOfSections  = section_count;
 
-    struct coff_header** header_offset = (struct coff_header**)next_byte;
-    // This might produce really inneficient code
-    **header_offset = header;
-    (*header_offset)++;
+    PE_headers.opt_header.AddressOfEntryPoint   = section_table[0U].VirtualAddress;
+    PE_headers.opt_header.BaseOfCode            = section_table[0U].VirtualAddress;
+    PE_headers.opt_header.SizeOfCode            = section_table[0U].SizeOfRawData;
+
+    PE_headers.opt_header.SizeOfHeaders = ALIGN(sizeof(PE_headers) + (sizeof(IMAGE_SECTION_HEADER) * section_count), FILE_ALIGNMENT); // must be aligned on file alignment
+}
+
+static u8 test_main[] = { 0x33, 0xc0, 0xc3 };
+
+static void write_text_section(u8** buffer, IMAGE_SECTION_HEADER* section_table, u16* section_count) {
+    u64 start = (u64)*buffer;
+
+    mem_cpy(test_main, buffer, sizeof(test_main));
+
+    u32 code_size = sizeof(test_main);
+    u32 size = (u32)ALIGN(code_size, FILE_ALIGNMENT);
+    mem_set((*buffer) + code_size, size - code_size, 0xCC);
+
+
+    IMAGE_SECTION_HEADER* text_section_header = &section_table[*section_count];
+    mem_cpy(".text", text_section_header->Name, 6U);
+    text_section_header->Misc.VirtualSize        = ALIGN(size, SECTION_ALIGNMENT); // Aligned on section alignement ?
+    text_section_header->VirtualAddress         = 0x0U;
+    text_section_header->SizeOfRawData          = size;
+    text_section_header->PointerToRawData       = 0x0U;
+    text_section_header->PointerToRelocations   = 0x0U;
+    text_section_header->PointerToLinenumbers   = 0x0U;
+    text_section_header->NumberOfRelocations    = 0U;
+    text_section_header->NumberOfLinenumbers    = 0U;
+    text_section_header->Characteristics        = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ;
+
+    (*section_count)++;
 }
 
 int mainCRTStartup(void) {
@@ -569,11 +673,11 @@ int mainCRTStartup(void) {
     }
 
 
-    char* libs[64U] = {};
+    char* libs[64U] = { 0U };
     u32 libs_count = 0U;
     char* lib_paths = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     {
-        HRESULT ret = GetEnvironmentVariableA("LIB", (char*)lib_paths, 4096U);
+        DWORD ret = GetEnvironmentVariableA("LIB", (char*)lib_paths, 4096U);
         if (ret != 0U) {
             print("LIB: %s\n", lib_paths);
             libs[0U] = lib_paths;
@@ -640,19 +744,47 @@ int mainCRTStartup(void) {
     }
 
     // TODO: Reserve a huge block and commit when we need more memory
+    // u8* headers = VirtualAlloc(NULL, 4096U * 10U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     u8* exe_buffer = VirtualAlloc(NULL, 4096U * 10U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     u8* next_byte = exe_buffer;
     HANDLE output_file = CreateFile("./test.exe", GENERIC_WRITE, 0U, NULL, CREATE_ALWAYS, 0U, NULL);
 
-    write_ms_dos_stub(&next_byte);
-    write_coff_header(&next_byte);
+    __debugbreak();
+
+    IMAGE_SECTION_HEADER* section_table = (IMAGE_SECTION_HEADER*)VirtualAlloc(NULL, ALIGN(sizeof(IMAGE_SECTION_HEADER) * 96U, FILE_ALIGNMENT), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    u16 section_count = 0U;
+
+    // Write sections
+    write_text_section(&next_byte, section_table, &section_count);
+
+    // Set sections point to raw data
+    u32 virtual_offset = ALIGN(sizeof(PE_headers) + (sizeof(section_table[0U]) * section_count), SECTION_ALIGNMENT);
+    u32 file_offset = ALIGN(sizeof(PE_headers) + (sizeof(section_table[0U]) * section_count), FILE_ALIGNMENT);
+    IMAGE_SECTION_HEADER* cur_section = section_table;
+    for(u32 section_index = 0U; section_index < section_count; section_index++, cur_section++) {
+        cur_section->PointerToRawData = file_offset;
+        cur_section->VirtualAddress = virtual_offset;
+
+        file_offset += cur_section->SizeOfRawData;
+        virtual_offset += cur_section->Misc.VirtualSize;
+    }
+
+    write_exe_headers(section_table, section_count);
 
     DWORD bwrite = 0U;
-    u64 bytes_to_write = next_byte - exe_buffer;
-    ASSERT(bytes_to_write <= 0xffffffffU);
 
-    WriteFile(output_file, &exe_buffer, (DWORD)bytes_to_write, &bwrite, NULL);
-    ASSERT(bwrite == bytes_to_write);
+    WriteFile(output_file, (void*)&PE_headers, (DWORD)sizeof(PE_headers), &bwrite, NULL);
+    ASSERT(bwrite == sizeof(PE_headers))
+
+    DWORD aligned_table_size = ALIGN(sizeof(PE_headers) + sizeof(section_table[0U]) * section_count, FILE_ALIGNMENT) - sizeof(PE_headers);
+    WriteFile(output_file, (void*)section_table, aligned_table_size, &bwrite, NULL);
+    ASSERT(bwrite == aligned_table_size)
+
+    u64 bytes_to_write = (u64)(next_byte - exe_buffer);
+    ASSERT(bytes_to_write <= 0xffffffffU)
+    WriteFile(output_file, exe_buffer, (DWORD)bytes_to_write, &bwrite, NULL);
+    ASSERT(bwrite == bytes_to_write)
+
     CloseHandle(output_file);
 
     __debugbreak();

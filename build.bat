@@ -23,7 +23,6 @@ if EXIST %VS2022_PRO% (
     goto compilation
 )
 
-
 :compilation
 set C_FLAGS=/nologo /W4 /WX /Zi /GS- /GR- /Gs1000000000 /Fo:%BUILD_DIR%\ /Iinclude /Isrc /std:clatest /c /Tc
 set L_FLAGS=/WX /SUBSYSTEM:CONSOLE /NODEFAULTLIB /stack:0x100000,0x100000
@@ -36,7 +35,8 @@ if "%release%"=="0" (
 
 :: DBG
 :: Compile
-cl /Fd:%BUILD_DIR%\main.pdb %C_FLAGS% src\main.c
+cl.exe /Fd:%BUILD_DIR%\main.pdb %C_FLAGS% src\main.c
+:: clang-cl.exe /Fd:%BUILD_DIR%\main.pdb %C_FLAGS% src\main.c
 
 :: Link
 link %L_FLAGS% /OUT:%BUILD_DIR%\main.exe %BUILD_DIR%\main.obj kernel32.lib
