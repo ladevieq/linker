@@ -15,67 +15,9 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
-static const u32 TEXT_SECTION_FLAGS = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
-static const u32 DRECTVE_SECTION_FLAGS = (IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
-static const u64 lib_signature = 0x0A3E686372613C21; // IMAGE_ARCHIVE_START
-
 #define ALIGN(x, align) (((x) + (align - 1U)) / (align)) * (align)
 
 #define ASSERT(x) if (!(x)) { __debugbreak(); }
-
-struct coff_header {
-    u16 machine_type;
-    u16 sections_count;
-    u32 timestamp;
-    u32 symbol_table_offset;
-    u32 symbols_count;
-    u16 optional_header_size;
-    u16 characteristics;
-};
-
-#pragma pack(1)
-struct coff_symbol {
-    union {
-        u8 name[8U];
-        struct {
-            u32 zeroes;
-            u32 offset;
-        };
-    };
-    u32 value;
-    i16 section_number;
-    u16 type;
-    u8 storage_class;
-    u8 number_of_aux_symbols;
-};
-
-// https://learn.microsoft.com/en-us/windows/win32/Debug/pe-format#section-table-section-headers
-struct section_header {
-    u8  name[8U];
-    u32 virtual_size;
-    u32 virtual_addr;
-    u32 size_of_raw_data;
-    u32 pointer_to_raw_data;
-    u32 pointer_to_relocations;
-    u32 pointer_to_line_numbers;
-    u16 number_of_relocations;
-    u16 number_of_line_numbers;
-    u32 characteristics;
-};
-
-struct base_relocation_block {
-    u32 page_rva;
-    u32 block_size;
-};
-
-struct relocation_entry {
-    // u16 type: 4;
-    // u16 offset: 12;
-
-    u32 virtual_address;
-    u32 symbol_index;
-    u16 type;
-};
 
 static u8 is_alpha(char c) {
     return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
@@ -256,49 +198,55 @@ static void print(const char* format, ...) {
     SUCCEEDED(WriteFile(standard_err, formatted_str, length, NULL, NULL));
 }
 
+
+static const u32 TEXT_SECTION_FLAGS = (IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
+static const u32 DRECTVE_SECTION_FLAGS = (IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE);
+static const u64 lib_signature = 0x0A3E686372613C21; // IMAGE_ARCHIVE_START
+
 static void read_COFF(u8* buffer) {
     u8* next_byte = buffer;
-    struct coff_header header = *(struct coff_header*)next_byte;
+    IMAGE_FILE_HEADER header = *(IMAGE_FILE_HEADER*)next_byte;
     next_byte += sizeof(header);
 
-    if (header.machine_type == IMAGE_FILE_MACHINE_AMD64) {
+    if (header.Machine == IMAGE_FILE_MACHINE_AMD64) {
         print("MACHINE: x64\n");
     }
 
-    print("SECTIONS: %u\n", header.sections_count);
-    print("SYMBOLS COUNT: %u\n", header.symbols_count);
+    print("SECTIONS: %u\n", header.NumberOfSections);
+    print("SYMBOLS COUNT: %u\n", header.NumberOfSymbols);
 
-    if (header.optional_header_size > 0U) {
+    if (header.SizeOfOptionalHeader > 0U) {
         IMAGE_OPTIONAL_HEADER64 optional_header = *(IMAGE_OPTIONAL_HEADER64*)next_byte;
         print("MAGIC: %u\n", optional_header.Magic);
-        next_byte += header.optional_header_size;
+        next_byte += header.SizeOfOptionalHeader;
     }
 
-    struct coff_symbol* symbol_table = (struct coff_symbol*)(buffer + header.symbol_table_offset);
-    u8* string_table = (u8*)symbol_table + sizeof(*symbol_table) * header.symbols_count;
+    IMAGE_SYMBOL* symbol_table = (IMAGE_SYMBOL*)(buffer + header.PointerToSymbolTable);
+    u8* string_table = (u8*)symbol_table + sizeof(*symbol_table) * header.NumberOfSymbols;
 
-    struct section_header* sections = (struct section_header*)next_byte;
-    next_byte += sizeof(sections[0]) * header.sections_count;
-    for (u32 section_index = 0U; section_index < header.sections_count; section_index++) {
-        struct section_header* section = &sections[section_index];
-        print("SECTION NAME: %s\n", section->name);
-        print("SECTION OFFSET: %u\n", section->pointer_to_raw_data);
-        print("SECTION SIZE: %u\n", section->size_of_raw_data);
-        print("SECTION RELOCATIONS COUNT: %u\n", section->number_of_relocations);
+    IMAGE_SECTION_HEADER* sections = (IMAGE_SECTION_HEADER*)next_byte;
+    next_byte += sizeof(sections[0]) * header.NumberOfSections;
+    for (u32 section_index = 0U; section_index < header.NumberOfSections; section_index++) {
+        IMAGE_SECTION_HEADER* section = &sections[section_index];
+        print("SECTION NAME: %s\n", section->Name);
+        print("SECTION OFFSET: %u\n", section->PointerToRawData);
+        print("SECTION SIZE: %u\n", section->SizeOfRawData);
+        print("SECTION RELOCATIONS COUNT: %u\n", section->NumberOfRelocations);
 
-        u8* reloc_start = &buffer[section->pointer_to_relocations];
-        struct relocation_entry* cur_reloc_entry = (struct relocation_entry*)reloc_start;
+        u8* reloc_start = &buffer[section->PointerToRelocations];
+        IMAGE_RELOCATION* cur_reloc_entry = (IMAGE_RELOCATION*)reloc_start;
 
-        for (u32 reloc_index = 0U; reloc_index < section->number_of_relocations; reloc_index++, cur_reloc_entry++) {
-            print("SYMBOL INDEX : %u\n", cur_reloc_entry->symbol_index);
+        // Section relocations
+        for (u32 reloc_index = 0U; reloc_index < section->NumberOfRelocations; reloc_index++, cur_reloc_entry++) {
+            print("SYMBOL INDEX : %u\n", cur_reloc_entry->SymbolTableIndex);
 
-            struct coff_symbol* sym = symbol_table;
-            for (u32 symbol_index = 0U; symbol_index < cur_reloc_entry->symbol_index; symbol_index++, sym++) {
-            }
-            if (sym->zeroes == 0U) {
-                print("SYMBOL NAME : %s\n", string_table + sym->offset);
-            } else {
-                print("SYMBOL NAME : %s.8\n", sym->name);
+            IMAGE_SYMBOL* sym = symbol_table;
+            for (u32 symbol_index = 0U; symbol_index < cur_reloc_entry->SymbolTableIndex; symbol_index++, sym++) {
+                if (sym->N.Name.Short == 0U) { // use longname
+                    print("SYMBOL NAME : %s\n", string_table + sym->N.Name.Long);
+                } else {
+                    print("SYMBOL NAME : %s.8\n", sym->N.ShortName);
+                }
             }
 
             // if (cur_reloc_entry->type == IMAGE_REL_AMD64_ABSOLUTE) {
@@ -338,16 +286,16 @@ static void read_COFF(u8* buffer) {
             // }
         }
 
-        if (section->characteristics & IMAGE_SCN_LNK_INFO) // .drectve
+        if (section->Characteristics & IMAGE_SCN_LNK_INFO) // .drectve
         {
-            u8* drectve_start = &buffer[section->pointer_to_raw_data];
+            u8* drectve_start = &buffer[section->PointerToRawData];
             print("%s\n", drectve_start);
-        } else if ((section->characteristics & DRECTVE_SECTION_FLAGS) == DRECTVE_SECTION_FLAGS) { // .data
-            u8* data_start = &buffer[section->pointer_to_raw_data];
+        } else if ((section->Characteristics & DRECTVE_SECTION_FLAGS) == DRECTVE_SECTION_FLAGS) { // .data
+            u8* data_start = &buffer[section->PointerToRawData];
             u8* cur_data = data_start;
-            while ((cur_data - data_start) < section->size_of_raw_data) {
+            while ((cur_data - data_start) < section->SizeOfRawData) {
                 size_t len = 0U;
-                StringCchLengthA((STRSAFE_LPSTR)cur_data, section->size_of_raw_data, &len);
+                StringCchLengthA((STRSAFE_LPSTR)cur_data, section->SizeOfRawData, &len);
                 if (len == 0U) {
                     cur_data++;
                 } else {
@@ -355,59 +303,38 @@ static void read_COFF(u8* buffer) {
                     cur_data += len;
                 }
             }
-        } else if ((section->characteristics & TEXT_SECTION_FLAGS) == TEXT_SECTION_FLAGS) { // .text
+        } else if ((section->Characteristics & TEXT_SECTION_FLAGS) == TEXT_SECTION_FLAGS) { // .text
             // u8* text_start = &buffer[section->pointer_to_raw_data];
         }
     }
 
-    struct coff_symbol* cur_symbol = symbol_table;
-    for (u32 symbol_index = 0U; symbol_index < header.symbols_count; symbol_index++, cur_symbol++) {
+    // TODO: Check that this doesn't overlap with sections relocation symbols
+    IMAGE_SYMBOL* cur_symbol = symbol_table;
+    for (u32 symbol_index = 0U; symbol_index < header.NumberOfSymbols; symbol_index++, cur_symbol++) {
 
-        if (cur_symbol->zeroes == 0U) {
-            print("SYMBOL NAME : %s\n", string_table + cur_symbol->offset);
+        if (cur_symbol->N.Name.Short == 0U) {
+            // use longname
+            print("SYMBOL NAME : %s\n", string_table + cur_symbol->N.Name.Long);
         } else {
-            print("SYMBOL NAME : %s.8\n", cur_symbol->name);
+            print("SYMBOL NAME : %s.8\n", cur_symbol->N.ShortName);
         }
 
-        if (cur_symbol->section_number > 1) {
-            print("SECTION: %s\n", sections[(u16)cur_symbol->section_number - 1U].name);
-        } else if (cur_symbol->section_number == IMAGE_SYM_UNDEFINED) {
+        if (cur_symbol->SectionNumber > 1) {
+            print("SECTION: %s\n", sections[(u16)cur_symbol->SectionNumber - 1U].Name);
+        } else if (cur_symbol->SectionNumber == IMAGE_SYM_UNDEFINED) {
             print("SECTION: EXTERNAL SYMBOL\n");
-        } else if (cur_symbol->section_number == IMAGE_SYM_ABSOLUTE) {
+        } else if (cur_symbol->SectionNumber == IMAGE_SYM_ABSOLUTE) {
             print("SECTION: ABSOLUTE\n");
-        } else if (cur_symbol->section_number == IMAGE_SYM_DEBUG) {
+        } else if (cur_symbol->SectionNumber == IMAGE_SYM_DEBUG) {
             print("SECTION: DEBUG\n");
         }
 
-        if (cur_symbol->number_of_aux_symbols > 0U) {
-            cur_symbol += cur_symbol->number_of_aux_symbols;
+        if (cur_symbol->NumberOfAuxSymbols > 0U) {
+            cur_symbol += cur_symbol->NumberOfAuxSymbols;
             symbol_index++;
         }
     }
 }
-
-struct archive_member_header {
-    u8 name[16U];
-    u8 data[12U];
-    u8 userID[6U];
-    u8 groupID[6U];
-    u64 mode;
-    u8 size[10U];
-    u16 end;
-};
-
-struct import_header {
-    u16 sig1;
-    u16 sig2;
-    u16 version;
-    u16 machine;
-    u32 timestamp;
-    u32 size;
-    u16 ordinal;
-    u16 import_type:    2;
-    u16 name_type:      3;
-    u16 reserved:       11;
-};
 
 #define BSWAP32(x) ((x & 0x000000FF) << 24U) | ((x & 0x0000FF00) << 8U) | ((x & 0x00FF0000) >> 8U) | ((x & 0xFF000000) >> 24U)
 
@@ -416,9 +343,9 @@ static void read_lib(u8* buffer) {
 
     {
         print("FIRST LINKER MEMBER\n");
-        struct archive_member_header* first_linker_member = (struct archive_member_header*)next_byte;
+        IMAGE_ARCHIVE_MEMBER_HEADER* first_linker_member = (IMAGE_ARCHIVE_MEMBER_HEADER*)next_byte;
         next_byte += sizeof(*first_linker_member);
-        if (first_linker_member->name[0U] != '/') { // IMAGE_ARCHIVE_LINKER_MEMBER
+        if (first_linker_member->Name[0U] != '/') { // IMAGE_ARCHIVE_LINKER_MEMBER
             return;
         }
 
@@ -443,9 +370,9 @@ static void read_lib(u8* buffer) {
     u32 archive_members_count = 0U;
     {
         print("SECOND LINKER MEMBER\n");
-        struct archive_member_header* second_linker_member = (struct archive_member_header*)next_byte;
+        IMAGE_ARCHIVE_MEMBER_HEADER* second_linker_member = (IMAGE_ARCHIVE_MEMBER_HEADER*)next_byte;
         next_byte += sizeof(*second_linker_member);
-        if (second_linker_member->name[0U] != '/') { // IMAGE_ARCHIVE_LINKER_MEMBER
+        if (second_linker_member->Name[0U] != '/') { // IMAGE_ARCHIVE_LINKER_MEMBER
             return;
         }
 
@@ -473,8 +400,8 @@ static void read_lib(u8* buffer) {
     }
 
     {
-        struct archive_member_header* longnames_member = (struct archive_member_header*)next_byte;
-        if (longnames_member->name[0U] == '/' && longnames_member->name[1U] == '/') { // IMAGE_ARCHIVE_LONGNAMES_MEMBER
+        IMAGE_ARCHIVE_MEMBER_HEADER* longnames_member = (IMAGE_ARCHIVE_MEMBER_HEADER*)next_byte;
+        if (longnames_member->Name[0U] == '/' && longnames_member->Name[1U] == '/') { // IMAGE_ARCHIVE_LONGNAMES_MEMBER
             next_byte += sizeof(*longnames_member);
         }
     }
@@ -482,25 +409,25 @@ static void read_lib(u8* buffer) {
     print("ARCHIVE COUNT: %u\n", archive_members_count);
     for (u32 archive_index = 0U; archive_index < archive_members_count; archive_index++) {
         next_byte += (u64)next_byte % 2U;
-        struct archive_member_header* header = (struct archive_member_header*)next_byte;
+        IMAGE_ARCHIVE_MEMBER_HEADER* header = (IMAGE_ARCHIVE_MEMBER_HEADER*)next_byte;
         next_byte += sizeof(*header);
 
         u32 size = 0U;
-        for (u8* c = (u8*)header->size; *c != 0x20 && size< sizeof(header->size) / sizeof(header->size[0U]); c++, size++) {
+        for (u8* c = (u8*)header->Size; *c != 0x20 && size< sizeof(header->Size) / sizeof(header->Size[0U]); c++, size++) {
         }
-        u64 archive_size = atou64((char*)header->size, size);
+        u64 archive_size = atou64((char*)header->Size, size);
 
 
-        print("ARCHIVE NAME: %s.16\n", header->name);
-        print("ARCHIVE SIZE: %s.10, %u\n", header->size, archive_size);
+        print("ARCHIVE NAME: %s.16\n", header->Name);
+        print("ARCHIVE SIZE: %s.10, %u\n", header->Size, archive_size);
 
-        if (header->name[0U] == '/') { // Special member
+        if (header->Name[0U] == '/') { // Special member
             next_byte += archive_size;
             continue;
         }
 
         if (*(u16*)next_byte == 0U) {
-            struct import_header* import_header = (struct import_header*)next_byte;
+            IMPORT_OBJECT_HEADER* import_header = (IMPORT_OBJECT_HEADER*)next_byte;
             char* import_name = (char*)next_byte + sizeof(*import_header);
 
             size_t len = 0U;
@@ -526,6 +453,8 @@ struct PE_headers {
 
 #define SECTION_ALIGNMENT   4096U  // default values for optional header
 #define FILE_ALIGNMENT      512U      // default values for optional header
+
+#define OBJ_EXT             0x6A626F2E // .obj
 
 static void write_exe_headers(u8* buffer) {
     static struct PE_headers PE_headers = {
@@ -633,20 +562,27 @@ static void write_text_section(IMAGE_SECTION_HEADER* section_table, u16* section
 }
 
 int mainCRTStartup(void) {
+    // copy of the command line passed to the program
     char* args_string = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    char** argv = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    // arg array
+    const char** argv = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    // arg size array
+    u32* argc = VirtualAlloc(NULL, 4096U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     argv[0U] = args_string;
-    u32 argc = 1U;
+    argc[0U] = 0U;
+    u32 arg_count = 1U;
 
     {
         LPSTR args = GetCommandLineA();
 
         for (u32 char_index = 0U; *(args + char_index) != '\0'; char_index++) {
             char c = *(args + char_index);
+            argc[arg_count - 1U]++;
             if (c == ' ') {
                 args_string[char_index] = '\0';
-                argv[argc] = &args_string[char_index + 1U];
-                argc++;
+                argv[arg_count] = &args_string[char_index + 1U];
+                arg_count++;
+                argc[arg_count - 1U] = 0U;
             } else 
             {
                 args_string[char_index] = c;
@@ -654,6 +590,25 @@ int mainCRTStartup(void) {
         }
     }
 
+    for (u32 arg_index = 0U; arg_index < arg_count; arg_index++) {
+        const char* arg = argv[arg_index];
+        u32 arg_size = argc[arg_index];
+
+        print("arg : %s, arg size : %u\n", arg, arg_size);
+    }
+
+    const char* obj_files[64U] = { NULL };
+    u32 obj_files_count = 0U;
+
+    for (u32 arg_index = 0U; arg_index < arg_count; arg_index++) {
+        const char* arg = argv[arg_index];
+        u32 arg_size = argc[arg_index];
+        u32 arg_ext = *(u32*)(arg + arg_size - 5U);
+        if (arg_ext == OBJ_EXT) {
+            obj_files[obj_files_count] = arg;
+            obj_files_count++;
+        }
+    }
 
     char* libs[64U] = { 0U };
     u32 libs_count = 0U;
@@ -684,7 +639,7 @@ int mainCRTStartup(void) {
     }
 
     char* filepath = VirtualAlloc(NULL, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    for (u32 arg_index = 1U; arg_index < argc; arg_index++) {
+    for (u32 arg_index = 1U; arg_index < arg_count; arg_index++) {
         // NtCreateFile(".\build\main.obj", GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0U, NULL);
         print("ARG %u: %s\n", arg_index, argv[arg_index]);
 
@@ -741,6 +696,8 @@ int mainCRTStartup(void) {
     // Write section headers
     write_text_section(section_table, &section_count);
 
+    headers->img_header.NumberOfSections   = section_count;
+
     // Write section bodies
     // TODO: index per section ?
     u32 code_size = sizeof(test_main);
@@ -765,7 +722,6 @@ int mainCRTStartup(void) {
     }
 
     // Fill remaining header informations
-    headers->img_header.NumberOfSections   = section_count;
 
     headers->opt_header.SizeOfHeaders       = headers_size; // aligned on file alignment
     headers->opt_header.AddressOfEntryPoint = section_table[0U].VirtualAddress;
