@@ -42,9 +42,5 @@ cl.exe /Fd:%BUILD_DIR%\main.pdb %C_FLAGS% src\main.c
 link %L_FLAGS% /OUT:%BUILD_DIR%\main.exe %BUILD_DIR%\main.obj kernel32.lib
 
 :: Test program
-REM set SRC_FILE=test
 :: Compile
-REM cl /Fd:%BUILD_DIR%\%SRC_FILE%.pdb %C_FLAGS% src/%SRC_FILE%.c
-
-:: Link
-REM link %L_FLAGS% %BUILD_DIR%\%SRC_FILE%.obj /OUT:%BUILD_DIR%\%SRC_FILE%.exe kernel32.lib
+cl.exe %C_FLAGS% test\main.c /Fd:%BUILD_DIR%\test.pdb /Fo:%BUILD_DIR%\test.obj

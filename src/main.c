@@ -86,7 +86,7 @@ static u8 is_decimal_digit(char c) {
 }
 
 // TODO: Improve
-static void mem_cpy(void* src, void* dst, size_t size) {
+static void mem_copy(void* src, void* dst, size_t size) {
     u8* byte_src = (u8*)src;
     u8* byte_dst = (u8*)dst;
 
@@ -522,130 +522,112 @@ struct PE_headers {
     u32 nt_signature;
     IMAGE_FILE_HEADER img_header;
     IMAGE_OPTIONAL_HEADER64 opt_header;
-
 };
 
 #define SECTION_ALIGNMENT   4096U  // default values for optional header
 #define FILE_ALIGNMENT      512U      // default values for optional header
 
-static struct PE_headers PE_headers = {
-    .dos_header = {
-        .e_magic    = IMAGE_DOS_SIGNATURE,
-        .e_cblp     = 0x0009U,
-        .e_cp       = 0x0003U,
-        .e_crlc     = 0x0U,
-        .e_cparhdr  = 0x0U,
-        .e_minalloc = 0x0U,
-        .e_maxalloc = 0x0U,
-        .e_ss       = 0x0U,
-        .e_sp       = 0x0U,
-        .e_csum     = 0x0U,
-        .e_ip       = 0x0U,
-        .e_cs       = 0x0U,
-        .e_lfarlc   = 0x0U,
-        .e_ovno     = 0x0U,
-        .e_res      = { 0x0 },
-        .e_oemid    = 0x0U,
-        .e_oeminfo  = 0x0U,
-        .e_res2     = { 0x0 },
-        .e_lfanew   = offsetof(struct PE_headers, nt_signature),
-    },
-    .dos_stub = {
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 
-        0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
-        0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68, 
-        0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
-        0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F, 
-        0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
-        0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20, 
-        0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
-        0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-    },
-    .nt_signature = IMAGE_NT_SIGNATURE,
-    .img_header = {
-        .Machine                = IMAGE_FILE_MACHINE_AMD64,
-        .NumberOfSections       = 0U,
-        .TimeDateStamp          = 0U,
-        .PointerToSymbolTable   = 0U,
-        .NumberOfSymbols        = 0U,
-        .SizeOfOptionalHeader   = sizeof(PE_headers.opt_header),
-        .Characteristics        = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE,
-    },
-    .opt_header = {
-        .Magic                          = IMAGE_NT_OPTIONAL_HDR64_MAGIC,
-        .MajorLinkerVersion             = 0U,
-        .MinorLinkerVersion             = 1U,
-        .SizeOfCode                     = 0U,
-        .SizeOfInitializedData          = 0U,
-        .SizeOfUninitializedData        = 0U,
-        .AddressOfEntryPoint            = 0U,
-        .BaseOfCode                     = 0U,
-        .ImageBase                      = 0x00400000U,  // default value for Windows NT/2000/XP/95/98/ME
-        .SectionAlignment               = SECTION_ALIGNMENT,
-        .FileAlignment                  = FILE_ALIGNMENT,
-        .MajorOperatingSystemVersion    = 6U,
-        .MinorOperatingSystemVersion    = 0U,
-        .MajorImageVersion              = 0U,
-        .MinorImageVersion              = 0U,
-        .MajorSubsystemVersion          = 6U,
-        .MinorSubsystemVersion          = 0U,
-        .Win32VersionValue              = 0U,
-        .SizeOfImage                    = 4096U,    // must be aligned on section alignment
-        .SizeOfHeaders                  = 0U,       // must be aligned on file alignment
-        .CheckSum                       = 0U,
-        .Subsystem                      = IMAGE_SUBSYSTEM_WINDOWS_CUI,
-        .DllCharacteristics             = 0U,
-        .SizeOfStackReserve             = 4096U * 10U,  // Arbitrary values
-        .SizeOfStackCommit              = 4096U * 10U,  // Arbitrary values
-        .SizeOfHeapReserve              = 4096U * 10U,  // Arbitrary values
-        .SizeOfHeapCommit               = 4096U * 10U,  // Arbitrary values
-        .LoaderFlags = 0U,
-        .NumberOfRvaAndSizes = 0U,
-        .DataDirectory = { 0x0 },
-    },
-};
-
-static void write_exe_headers(IMAGE_SECTION_HEADER* section_table, u16 section_count) {
-    ASSERT(section_count > 0U)
+static void write_exe_headers(u8* buffer) {
+    static struct PE_headers PE_headers = {
+        .dos_header = {
+            .e_magic    = IMAGE_DOS_SIGNATURE,
+            .e_cblp     = 0x0U,
+            .e_cp       = 0x0U,
+            .e_crlc     = 0x0U,
+            .e_cparhdr  = 0x0U,
+            .e_minalloc = 0x0U,
+            .e_maxalloc = 0x0U,
+            .e_ss       = 0x0U,
+            .e_sp       = 0x0U,
+            .e_csum     = 0x0U,
+            .e_ip       = 0x0U,
+            .e_cs       = 0x0U,
+            .e_lfarlc   = 0x0U,
+            .e_ovno     = 0x0U,
+            .e_res      = { 0x0 },
+            .e_oemid    = 0x0U,
+            .e_oeminfo  = 0x0U,
+            .e_res2     = { 0x0 },
+            .e_lfanew   = offsetof(struct PE_headers, nt_signature),
+        },
+        .dos_stub = {
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 
+            0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
+            0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68, 
+            0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
+            0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F, 
+            0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
+            0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20, 
+            0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
+            0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        },
+        .nt_signature = IMAGE_NT_SIGNATURE,
+        .img_header = {
+            .Machine                = IMAGE_FILE_MACHINE_AMD64,
+            .NumberOfSections       = 0U,
+            .TimeDateStamp          = 0U,
+            .PointerToSymbolTable   = 0U,
+            .NumberOfSymbols        = 0U,
+            .SizeOfOptionalHeader   = sizeof(PE_headers.opt_header),
+            .Characteristics        = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE,
+        },
+        .opt_header = {
+            .Magic                          = IMAGE_NT_OPTIONAL_HDR64_MAGIC,
+            .MajorLinkerVersion             = 0U,
+            .MinorLinkerVersion             = 1U,
+            .SizeOfCode                     = 0U,
+            .SizeOfInitializedData          = 0U,
+            .SizeOfUninitializedData        = 0U,
+            .AddressOfEntryPoint            = 0U,
+            .BaseOfCode                     = 0U,
+            .ImageBase                      = 0x00400000U,  // default value for Windows NT/2000/XP/95/98/ME
+            .SectionAlignment               = SECTION_ALIGNMENT,
+            .FileAlignment                  = FILE_ALIGNMENT,
+            .MajorOperatingSystemVersion    = 6U,
+            .MinorOperatingSystemVersion    = 0U,
+            .MajorImageVersion              = 0U,
+            .MinorImageVersion              = 0U,
+            .MajorSubsystemVersion          = 6U,
+            .MinorSubsystemVersion          = 0U,
+            .Win32VersionValue              = 0U,
+            .SizeOfImage                    = 0U,           // must be aligned on section alignment
+            .SizeOfHeaders                  = 0U,           // must be aligned on file alignment
+            .CheckSum                       = 0U,
+            .Subsystem                      = IMAGE_SUBSYSTEM_WINDOWS_CUI,
+            .DllCharacteristics             = 0U,
+            .SizeOfStackReserve             = 4096U * 10U,  // Arbitrary values
+            .SizeOfStackCommit              = 4096U * 10U,  // Arbitrary values
+            .SizeOfHeapReserve              = 4096U * 10U,  // Arbitrary values
+            .SizeOfHeapCommit               = 4096U * 10U,  // Arbitrary values
+            .LoaderFlags = 0U,
+            .NumberOfRvaAndSizes = 0U,
+            .DataDirectory = { 0x0 },
+        },
+    };
 
     FILETIME filetime = { 0U };
     GetSystemTimeAsFileTime(&filetime);
 
     PE_headers.img_header.TimeDateStamp     = filetime.dwLowDateTime;
-    PE_headers.img_header.NumberOfSections  = section_count;
 
-    PE_headers.opt_header.AddressOfEntryPoint   = section_table[0U].VirtualAddress;
-    PE_headers.opt_header.BaseOfCode            = section_table[0U].VirtualAddress;
-    PE_headers.opt_header.SizeOfCode            = section_table[0U].SizeOfRawData;
-
-    PE_headers.opt_header.SizeOfHeaders = ALIGN(sizeof(PE_headers) + (sizeof(IMAGE_SECTION_HEADER) * section_count), FILE_ALIGNMENT); // must be aligned on file alignment
+    mem_copy(&PE_headers, buffer, sizeof(PE_headers));
 }
 
 static u8 test_main[] = { 0x33, 0xc0, 0xc3 };
 
-static void write_text_section(u8** buffer, IMAGE_SECTION_HEADER* section_table, u16* section_count) {
-    u64 start = (u64)*buffer;
-
-    mem_cpy(test_main, buffer, sizeof(test_main));
-
-    u32 code_size = sizeof(test_main);
-    u32 size = (u32)ALIGN(code_size, FILE_ALIGNMENT);
-    mem_set((*buffer) + code_size, size - code_size, 0xCC);
-
-
+static void write_text_section(IMAGE_SECTION_HEADER* section_table, u16* section_count) {
     IMAGE_SECTION_HEADER* text_section_header = &section_table[*section_count];
-    mem_cpy(".text", text_section_header->Name, 6U);
-    text_section_header->Misc.VirtualSize        = ALIGN(size, SECTION_ALIGNMENT); // Aligned on section alignement ?
+    mem_copy(".text", text_section_header->Name, 6U);
+
     text_section_header->VirtualAddress         = 0x0U;
-    text_section_header->SizeOfRawData          = size;
     text_section_header->PointerToRawData       = 0x0U;
     text_section_header->PointerToRelocations   = 0x0U;
     text_section_header->PointerToLinenumbers   = 0x0U;
     text_section_header->NumberOfRelocations    = 0U;
     text_section_header->NumberOfLinenumbers    = 0U;
-    text_section_header->Characteristics        = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ;
+    text_section_header->Characteristics        = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_EXECUTE;
 
     (*section_count)++;
 }
@@ -744,51 +726,62 @@ int mainCRTStartup(void) {
     }
 
     // TODO: Reserve a huge block and commit when we need more memory
-    // u8* headers = VirtualAlloc(NULL, 4096U * 10U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     u8* exe_buffer = VirtualAlloc(NULL, 4096U * 10U, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    u8* next_byte = exe_buffer;
     HANDLE output_file = CreateFile("./test.exe", GENERIC_WRITE, 0U, NULL, CREATE_ALWAYS, 0U, NULL);
 
     __debugbreak();
 
-    IMAGE_SECTION_HEADER* section_table = (IMAGE_SECTION_HEADER*)VirtualAlloc(NULL, ALIGN(sizeof(IMAGE_SECTION_HEADER) * 96U, FILE_ALIGNMENT), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    struct PE_headers* headers = (struct PE_headers*)exe_buffer;
+    IMAGE_SECTION_HEADER* section_table = (IMAGE_SECTION_HEADER*)(exe_buffer + sizeof(*headers));
     u16 section_count = 0U;
 
-    // Write sections
-    write_text_section(&next_byte, section_table, &section_count);
+    // dont write section count to img header
+    write_exe_headers(exe_buffer);
 
-    // Set sections point to raw data
-    u32 virtual_offset = ALIGN(sizeof(PE_headers) + (sizeof(section_table[0U]) * section_count), SECTION_ALIGNMENT);
-    u32 file_offset = ALIGN(sizeof(PE_headers) + (sizeof(section_table[0U]) * section_count), FILE_ALIGNMENT);
+    // Write section headers
+    write_text_section(section_table, &section_count);
+
+    // Write section bodies
+    // TODO: index per section ?
+    u32 code_size = sizeof(test_main);
+    u32 headers_size = ALIGN(sizeof(*headers) + (sizeof(IMAGE_SECTION_HEADER) * section_count), FILE_ALIGNMENT);
+    mem_copy(test_main, (void*)(exe_buffer + headers_size), code_size);
+    section_table[0U].SizeOfRawData     = ALIGN(code_size, FILE_ALIGNMENT);
+    section_table[0U].Misc.VirtualSize  = ALIGN(code_size, SECTION_ALIGNMENT);
+
+    // Set sections pointer to raw data
+    _Static_assert(FILE_ALIGNMENT < SECTION_ALIGNMENT, "section alignment must greater or equal to file alignment in order to align headers_size on section alignment");
+    u32 file_offset = headers_size;
+    u32 virtual_offset = ALIGN(headers_size, SECTION_ALIGNMENT);
     IMAGE_SECTION_HEADER* cur_section = section_table;
-    for(u32 section_index = 0U; section_index < section_count; section_index++, cur_section++) {
+    for (u32 section_index = 0U; section_index < section_count; section_index++, cur_section++) {
         cur_section->PointerToRawData = file_offset;
         cur_section->VirtualAddress = virtual_offset;
 
+        ASSERT(cur_section->SizeOfRawData == ALIGN(cur_section->SizeOfRawData, FILE_ALIGNMENT));
+        ASSERT(cur_section->Misc.VirtualSize == ALIGN(cur_section->Misc.VirtualSize, SECTION_ALIGNMENT));
         file_offset += cur_section->SizeOfRawData;
         virtual_offset += cur_section->Misc.VirtualSize;
     }
 
-    write_exe_headers(section_table, section_count);
+    // Fill remaining header informations
+    headers->img_header.NumberOfSections   = section_count;
+
+    headers->opt_header.SizeOfHeaders       = headers_size; // aligned on file alignment
+    headers->opt_header.AddressOfEntryPoint = section_table[0U].VirtualAddress;
+    headers->opt_header.BaseOfCode          = section_table[0U].PointerToRawData;
+    headers->opt_header.SizeOfCode          = section_table[0U].SizeOfRawData;
+    headers->opt_header.SizeOfImage         = ALIGN(section_table[section_count - 1U].VirtualAddress + section_table[section_count - 1U].Misc.VirtualSize, SECTION_ALIGNMENT);
 
     DWORD bwrite = 0U;
-
-    WriteFile(output_file, (void*)&PE_headers, (DWORD)sizeof(PE_headers), &bwrite, NULL);
-    ASSERT(bwrite == sizeof(PE_headers))
-
-    DWORD aligned_table_size = ALIGN(sizeof(PE_headers) + sizeof(section_table[0U]) * section_count, FILE_ALIGNMENT) - sizeof(PE_headers);
-    WriteFile(output_file, (void*)section_table, aligned_table_size, &bwrite, NULL);
-    ASSERT(bwrite == aligned_table_size)
-
-    u64 bytes_to_write = (u64)(next_byte - exe_buffer);
-    ASSERT(bytes_to_write <= 0xffffffffU)
-    WriteFile(output_file, exe_buffer, (DWORD)bytes_to_write, &bwrite, NULL);
-    ASSERT(bwrite == bytes_to_write)
+    WriteFile(output_file, exe_buffer, headers->opt_header.SizeOfImage, &bwrite, NULL);
+    ASSERT(bwrite == headers->opt_header.SizeOfImage);
 
     CloseHandle(output_file);
 
     __debugbreak();
 
+    VirtualFree(exe_buffer, 0U, MEM_RELEASE);
     VirtualFree(filepath, 0U, MEM_RELEASE);
     VirtualFree(lib_paths, 0U, MEM_RELEASE);
     VirtualFree(argv, 0U, MEM_RELEASE);
